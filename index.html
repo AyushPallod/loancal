@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Loan Reconciliation Tool</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f9fafb;
+        color: #111;
+        max-width: 900px;
+        margin: 40px auto;
+        padding: 20px;
+      }
+      h2 {
+        text-align: center;
+      }
+      input, button {
+        padding: 8px;
+        margin: 5px 0;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+      }
+      th, td {
+        border: 1px solid #ccc;
+        padding: 8px;
+        text-align: center;
+      }
+      th {
+        background: #e8e8e8;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .payments {
+        margin-top: 15px;
+      }
+      .payments div {
+        display: flex;
+        gap: 10px;
+      }
+      button {
+        cursor: pointer;
+      }
+      .calculate {
+        width: 100%;
+        background: #007bff;
+        color: white;
+        border: none;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Loan Reconciliation Calculator</h2>
+
+    <div class="grid">
+      <div>
+        <label>Principal:</label>
+        <input id="principal" type="number" placeholder="e.g. 10000" />
+      </div>
+      <div>
+        <label>Annual Interest Rate (%):</label>
+        <input id="rate" type="number" placeholder="e.g. 12" />
+      </div>
+      <div>
+        <label>Opening Date:</label>
+        <input id="openDate" type="date" />
+      </div>
+      <div>
+        <label>Closing Date (optional):</label>
+        <input id="closeDate" type="date" />
+      </div>
+    </div>
+
+    <div class="payments">
+      <h4>Payments</h4>
+      <div id="paymentList"></div>
+      <button onclick="addPayment()">+ Add Payment</button>
+    </div>
+
+    <button class="calculate" onclick="calculate()">Calculate</button>
+
+    <div id="output"></div>
+
+    <script>
+      // Add payment rows dynamically
+      const addPayment = () => {
+        const div = document.createElement("div");
+        div.innerHTML = `
+          <input type="date" placeholder="Payment Date" class="pay-date" />
+          <input type="number" placeholder="Amount" class="pay-amt" />
+        `;
+        document.getElementById("paymentList").appendChild(div);
+      };
+
+      // Core calculation logic (daily accrual + monthly compounding)
+      function monthlyCompound(principal, rate, openDate, closeDate, payments) {
+        const dailyRate = rate / 100 / 365;
+        let p = principal;
+        let accrued = 0;
+        let results = [];
+        let current = new Date(openDate);
+        const end = closeDate ? new Date(closeDate) : new Date();
+        payments.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        while (current < end) {
+          let monthEnd = new Date(current);
+          monthEnd.setDate(monthEnd.getDate() + 30);
+          if (monthEnd > end) monthEnd = end;
+
+          const monthPayments = payments.filter(
+            (d) => new Date(d.date) > current && new Date(d.date) <= monthEnd
+          );
+
+          let last = current;
+          for (let pay of monthPayments) {
+            const payDate = new Date(pay.date);
+            const days = (payDate - last) / (1000 * 60 * 60 * 24);
+            const interest = p * dailyRate * days;
+            accrued += interest;
+
+            let amt = pay.amount;
+
+            // Payment logic: pay interest first, then principal
+            if (amt >= accrued) {
+              amt -= accrued;
+              accrued = 0;
+            } else {
+              accrued -= amt;
+              amt = 0;
+            }
+
+            if (amt > 0) p -= amt;
+
+            results.push({
+              date: payDate.toISOString().split("T")[0],
+              desc: "Payment",
+              interest: interest.toFixed(2),
+              payment: pay.amount.toFixed(2),
+              balance: p.toFixed(2),
+            });
+            last = payDate;
+          }
+
+          // Accrue interest for remaining period till month-end
+          const daysRem = (monthEnd - last) / (1000 * 60 * 60 * 24);
+          if (daysRem > 0) {
+            const interest = p * dailyRate * daysRem;
+            accrued += interest;
+          }
+
+          // Compound interest (add to principal)
+          p += accrued;
+          results.push({
+            date: monthEnd.toISOString().split("T")[0],
+            desc: "Month-end Compounding",
+            interest: accrued.toFixed(2),
+            payment: "-",
+            balance: p.toFixed(2),
+          });
+          accrued = 0;
+          current = monthEnd;
+        }
+        return results;
+      }
+
+      // Handle calculate click
+      const calculate = () => {
+        const principal = parseFloat(document.getElementById("principal").value);
+        const rate = parseFloat(document.getElementById("rate").value);
+        const openDate = document.getElementById("openDate").value;
+        let closeDate = document.getElementById("closeDate").value;
+
+        if (!principal || !rate || !openDate) {
+          alert("Please fill Principal, Rate, and Opening Date!");
+          return;
+        }
+
+        // If no closing date, take today
+        if (!closeDate) {
+          closeDate = new Date().toISOString().split("T")[0];
+        }
+
+        // Collect payments
+        const paymentNodes = document.querySelectorAll("#paymentList div");
+        const payments = Array.from(paymentNodes)
+          .map((row) => ({
+            date: row.querySelector(".pay-date").value,
+            amount: parseFloat(row.querySelector(".pay-amt").value || 0),
+          }))
+          .filter((p) => p.date && p.amount > 0);
+
+        // Run calculation
+        const ledger = monthlyCompound(principal, rate, openDate, closeDate, payments);
+
+        // Render table
+        let html = `<h3>Ledger</h3><table>
+          <tr><th>Date</th><th>Description</th><th>Interest</th><th>Payment</th><th>Balance</th></tr>`;
+
+        ledger.forEach((r) => {
+          html += `<tr>
+            <td>${r.date}</td>
+            <td>${r.desc}</td>
+            <td>${r.interest}</td>
+            <td>${r.payment}</td>
+            <td>${r.balance}</td>
+          </tr>`;
+        });
+
+        html += "</table>";
+        document.getElementById("output").innerHTML = html;
+      };
+    </script>
+  </body>
+</html>
